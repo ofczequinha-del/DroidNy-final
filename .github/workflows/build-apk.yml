@@ -1,1 +1,64 @@
+name: Build APK
 
+on: [push, workflow_dispatch]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Build web (modo SPA)
+        run: bun run build
+
+      - name: Localizar index.html gerado
+        run: |
+          WEB=""
+          for d in .output/public dist/client; do
+            if [ -f "$d/index.html" ]; then WEB="$d"; break; fi
+          done
+          if [ -z "$WEB" ]; then
+            echo "::error::index.html não foi gerado. Conteúdo do build:"
+            find .output dist -maxdepth 3 2>/dev/null | head -80
+            exit 1
+          fi
+          echo "Usando $WEB"
+          rm -rf www && mkdir www && cp -r "$WEB"/. www/
+          ls -la www
+
+      - name: Instalar Capacitor
+        run: |
+          bun add @capacitor/core @capacitor/android
+          bun add -d @capacitor/cli
+
+      - name: Criar projeto Android
+        run: bunx cap add android
+
+      - name: Sincronizar arquivos web
+        run: bunx cap sync android
+
+      - name: Compilar APK (debug)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Enviar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidny-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
